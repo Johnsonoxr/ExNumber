@@ -1,5 +1,6 @@
 package com.johnsonoxr.exnumber
 
+import com.johnsonoxr.exnumber.ExFloat.Companion.toExFloat
 import kotlin.math.*
 
 class ExFloat private constructor(
@@ -97,6 +98,7 @@ class ExFloat private constructor(
             }
 
             override fun convert(exFloat: ExFloat): String {
+                if (exFloat.sign == 0) return "0.0"
 
                 val rounded = exFloat.round(-decimalCount)
                 val roundedStr = DECIMAL.convert(rounded)
@@ -112,6 +114,8 @@ class ExFloat private constructor(
             }
 
             override fun convert(exFloat: ExFloat): String {
+                if (exFloat.sign == 0) return "0.0"
+
                 val pow = log10(exFloat.partitions.last().toDouble()).toInt()
                 val rounded = exFloat.round((exFloat.partitions.size - exFloat.expOffset - 1) * DIGIT + pow - decimalCount)
                 return SCIENCE.convert(rounded)
@@ -122,6 +126,8 @@ class ExFloat private constructor(
 
             val DEFAULT: StringConverter = object : StringConverter {
                 override fun convert(exFloat: ExFloat): String {
+                    if (exFloat.sign == 0) return "0.0"
+
                     val digits = (exFloat.partitions.size - exFloat.expOffset - 1) * DIGIT + log10(exFloat.partitions.last().toDouble()).toInt()
                     return when {
                         digits < 6 -> DECIMAL.convert(exFloat)
@@ -132,6 +138,8 @@ class ExFloat private constructor(
 
             val DECIMAL: StringConverter = object : StringConverter {
                 override fun convert(exFloat: ExFloat): String {
+                    if (exFloat.sign == 0) return "0.0"
+
                     val decimalExpTail = min(-exFloat.expOffset, 0)
                     val intExpHead = max(exFloat.partitions.size - exFloat.expOffset, 0)
 
@@ -149,6 +157,7 @@ class ExFloat private constructor(
 
             val SCIENCE: StringConverter = object : StringConverter {
                 override fun convert(exFloat: ExFloat): String {
+                    if (exFloat.sign == 0) return "0.0"
 
                     val readableExp = (exFloat.partitions.size - exFloat.expOffset - 1) * DIGIT +
                             floor(log10(exFloat.partitions.last().toDouble())).toInt()
