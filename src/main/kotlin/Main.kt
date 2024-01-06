@@ -1,13 +1,12 @@
 package com.johnsonoxr.exnumber
 
 import com.johnsonoxr.exnumber.ExFloat.Companion.toExFloat
-import kotlin.math.abs
-import kotlin.math.pow
+import kotlin.math.*
 import kotlin.system.measureNanoTime
 
 fun main() {
 
-    fun String.println() = println(this)
+    fun Any.println() = println(this)
 
     val testCount = 100000
     val intRange = Int.MIN_VALUE..Int.MAX_VALUE
@@ -122,4 +121,43 @@ fun main() {
             }
         }
     }.let { "double divide test passed, average time spent: ${"%.2f".format(it / 1000f / testCount)}us".println() }
+
+    measureNanoTime {
+        repeat(testCount) {
+            val (d1, f1) = doubleList.random()
+            val digitPlace = (-10..10).random()
+            val expect = round(d1 * 10.0.pow(digitPlace)) / 10.0.pow(digitPlace)
+            val roundResult = f1.round(-digitPlace)
+            if (abs(roundResult.toDouble() - expect) > abs(expect) * 1e-10) {
+                "Test #${it + 1} failed".println()
+                throw Exception("round test failed on $d1, expected: $expect, result: ${roundResult.toDouble()}, content: ${roundResult.content()}")
+            }
+        }
+    }.let { "round test passed, average time spent: ${"%.2f".format(it / 1000f / testCount)}us".println() }
+
+    measureNanoTime {
+        repeat(testCount) {
+            val (d1, f1) = doubleList.random()
+            val digitPlace = (-10..10).random()
+            val expect = floor(d1 * 10.0.pow(digitPlace)) / 10.0.pow(digitPlace)
+            val floorResult = f1.floor(-digitPlace)
+            if (abs(floorResult.toDouble() - expect) > abs(expect) * 1e-10) {
+                "Test #${it + 1} failed".println()
+                throw Exception("floor test failed on $d1, expected: $expect, result: ${floorResult.toDouble()}, content: ${floorResult.content()}")
+            }
+        }
+    }.let { "floor test passed, average time spent: ${"%.2f".format(it / 1000f / testCount)}us".println() }
+
+    measureNanoTime {
+        repeat(testCount) {
+            val (d1, f1) = doubleList.random()
+            val digitPlace = (-10..10).random()
+            val expect = ceil(d1 * 10.0.pow(digitPlace)) / 10.0.pow(digitPlace)
+            val ceilResult = f1.ceil(-digitPlace)
+            if (abs(ceilResult.toDouble() - expect) > abs(expect) * 1e-10) {
+                "Test #${it + 1} failed".println()
+                throw Exception("ceil test failed on $d1, expected: $expect, result: ${ceilResult.toDouble()}, content: ${ceilResult.content()}")
+            }
+        }
+    }.let { "ceil test passed, average time spent: ${"%.2f".format(it / 1000f / testCount)}us".println() }
 }

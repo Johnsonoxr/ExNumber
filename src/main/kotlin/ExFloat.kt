@@ -90,8 +90,47 @@ class ExFloat private constructor(
 
     interface StringConverter {
 
+        class RoundedDecimal(private val decimalCount: Int) : StringConverter {
+
+            init {
+                require(decimalCount >= 0) { "Decimal count must be positive." }
+            }
+
+            override fun convert(exFloat: ExFloat): String {
+
+                val rounded = exFloat.round(-decimalCount)
+                val roundedStr = DECIMAL.convert(rounded)
+
+                return roundedStr + "0".repeat(decimalCount - roundedStr.substringAfter('.', "NA").length)
+            }
+        }
+
+        class RoundedScience(private val decimalCount: Int) : StringConverter {
+
+            init {
+                require(decimalCount >= 0) { "Decimal count must be positive." }
+            }
+
+            override fun convert(exFloat: ExFloat): String {
+                val pow = log10(exFloat.partitions.last().toDouble()).toInt()
+                val rounded = exFloat.round((exFloat.partitions.size - exFloat.expOffset - 1) * DIGIT + pow - decimalCount)
+                return SCIENCE.convert(rounded)
+            }
+        }
+
         companion object {
+
             val DEFAULT: StringConverter = object : StringConverter {
+                override fun convert(exFloat: ExFloat): String {
+                    val digits = (exFloat.partitions.size - exFloat.expOffset - 1) * DIGIT + log10(exFloat.partitions.last().toDouble()).toInt()
+                    return when {
+                        digits < 6 -> DECIMAL.convert(exFloat)
+                        else -> SCIENCE.convert(exFloat)
+                    }
+                }
+            }
+
+            val DECIMAL: StringConverter = object : StringConverter {
                 override fun convert(exFloat: ExFloat): String {
                     val decimalExpTail = min(-exFloat.expOffset, 0)
                     val intExpHead = max(exFloat.partitions.size - exFloat.expOffset, 0)
@@ -114,14 +153,18 @@ class ExFloat private constructor(
                     val readableExp = (exFloat.partitions.size - exFloat.expOffset - 1) * DIGIT +
                             floor(log10(exFloat.partitions.last().toDouble())).toInt()
 
-                    if (abs(readableExp) < 6) {
-                        return DEFAULT.convert(exFloat)
-                    }
-
                     val numbers = exFloat.partitions.asReversed().joinToString("") { it.toString().padStart(DIGIT, '0') }.trim('0')
                     return "${if (exFloat.positive) "" else "-"}${numbers[0]}.${numbers.substring(1)}e${readableExp}"
                 }
             }
+
+            val DECIMAL_ROUNDED_TO_1: StringConverter = RoundedDecimal(1)
+            val DECIMAL_ROUNDED_TO_2: StringConverter = RoundedDecimal(2)
+            val DECIMAL_ROUNDED_TO_3: StringConverter = RoundedDecimal(3)
+
+            val SCIENCE_ROUNDED_TO_1: StringConverter = RoundedScience(1)
+            val SCIENCE_ROUNDED_TO_2: StringConverter = RoundedScience(2)
+            val SCIENCE_ROUNDED_TO_3: StringConverter = RoundedScience(3)
         }
 
         fun convert(exFloat: ExFloat): String
@@ -496,45 +539,72 @@ class ExFloat private constructor(
     }
 
     override fun hashCode(): Int {
-        return this.toString().hashCode()
+        return this.partitions.hashCode() + this.expOffset.hashCode() + this.positive.hashCode()
     }
 
-    fun floor(): ExFloat {
-        return when {
-            this.expOffset <= 0 -> this
+    fun floor(digit: Int = 0): ExFloat {
+        val rem = (digit % DIGIT + DIGIT) % DIGIT
+        val partitionIdx = (digit - rem) / DIGIT
+
+        val slicedPartition = getPartition(partitionIdx)
+
+        val trimmedPartition = when {
+            rem == 0 -> slicedPartition
             else -> {
-                val subPartitions = this.partitions.subList(expOffset, this.partitions.size)
-                val (trimmedPartitions, trimExp) = trim(subPartitions, 0)
-                val ret = ExFloat(trimmedPartitions, trimExp, this.positive)
-                return if (positive) ret else ret - 1
+                val remPow = 10.0.pow(rem).toInt()
+                val trimmedPartition = slicedPartition / remPow * remPow
+                trimmedPartition
+            }
+        }
+
+        val partitionFrom = (partitionIdx + 1 + expOffset).coerceIn(0, partitions.size)
+        val upperPartitions = listOf(trimmedPartition) + partitions.subList(partitionFrom, partitions.size)
+        val (trimmedPartitions, trimExp) = trim(upperPartitions, expOffset - partitions.size + upperPartitions.size)
+
+        return if (positive) {
+            ExFloat(trimmedPartitions, trimExp, true)
+        } else {
+            val hasRem = (slicedPartition - trimmedPartition > 0) || partitions.subList(0, partitionFrom).any { it != 0 }
+            when {
+                hasRem -> ExFloat(trimmedPartitions, trimExp, false) + ExFloat(listOf(10.0.pow(rem).toInt()), -partitionIdx, false)
+                else -> ExFloat(trimmedPartitions, trimExp, false)
             }
         }
     }
 
-    fun ceil(): ExFloat {
-        return when {
-            this.expOffset <= 0 -> this
-            else -> {
-                val subPartitions = this.partitions.subList(expOffset, this.partitions.size)
-                val (trimmedPartitions, trimExp) = trim(subPartitions, 0)
-                val ret = ExFloat(trimmedPartitions, trimExp, this.positive)
-                return if (positive) ret + 1 else ret
-            }
-        }
+    fun ceil(digit: Int = 0): ExFloat {
+        return -(-this).floor(digit)
     }
 
-    fun round(): ExFloat {
-        return when {
-            this.expOffset <= 0 -> this
-            else -> {
-                val subPartitions = this.partitions.subList(expOffset, this.partitions.size)
-                val (trimmedPartitions, trimExp) = trim(subPartitions, 0)
-                var ret = ExFloat(trimmedPartitions, trimExp, this.positive)
-                if (getPartition(-1) >= (EXP_MAX / 2)) {
-                    ret += if (positive) 1 else -1
-                }
-                return ret
+    fun round(digit: Int = 0): ExFloat {
+        val rem = (digit % DIGIT + DIGIT) % DIGIT
+        val partitionIdx = (digit - rem) / DIGIT
+
+        val slicedPartition = getPartition(partitionIdx)
+
+        val (trimmedPartition, nextDigit) = when {
+            rem == 0 -> {
+                val nextPartition = getPartition(partitionIdx - 1)
+                slicedPartition to (nextPartition / (EXP_MAX / 10))
             }
+
+            else -> {
+                val remPow = 10.0.pow(rem).toInt()
+                val trimmedPartition = slicedPartition / remPow * remPow
+                val nextDigit = ((slicedPartition - trimmedPartition) / 10.0.pow(rem - 1).toInt())
+                trimmedPartition to nextDigit
+            }
+        }
+
+        val partitionFrom = (partitionIdx + 1 + expOffset).coerceIn(0, partitions.size)
+        val upperPartitions = listOf(trimmedPartition) + partitions.subList(partitionFrom, partitions.size)
+        val (trimmedPartitions, trimExp) = trim(upperPartitions, expOffset - partitions.size + upperPartitions.size)
+
+        return if (nextDigit < 5) {
+            ExFloat(trimmedPartitions, trimExp, positive)
+        } else {
+            val one = ExFloat(listOf(10.0.pow(rem).toInt()), -partitionIdx, positive)
+            ExFloat(trimmedPartitions, trimExp, positive) + one
         }
     }
 
