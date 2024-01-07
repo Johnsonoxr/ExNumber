@@ -4,9 +4,63 @@ import com.johnsonoxr.exnumber.ExFloat.Companion.toExFloat
 import kotlin.math.*
 import kotlin.system.measureNanoTime
 
-fun main() {
+fun Any.println() = println(this)
 
-    fun Any.println() = println(this)
+fun main() {
+    stringTest()
+    performanceEvaluation()
+}
+
+fun stringTest() {
+    val largePI = "3.1415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679".toExFloat()
+
+    ExFloat.setGlobalStringConverter(ExFloat.StringConverter.DEFAULT)
+    "DEFAULT".println()
+    (-10..10).forEach { i ->
+        "${i.toString().padStart(4, ' ')}: ${(largePI * 10.0.pow(i))}".println()
+    }
+
+    ExFloat.setGlobalStringConverter(ExFloat.StringConverter.DECIMAL)
+    "DECIMAL".println()
+    (-10..10).forEach { i ->
+        "${i.toString().padStart(4, ' ')}: ${(largePI * 10.0.pow(i))}".println()
+    }
+
+    ExFloat.setGlobalStringConverter(ExFloat.StringConverter.SCIENTIFIC)
+    "SCIENTIFIC".println()
+    (-10..10).forEach { i ->
+        "${i.toString().padStart(4, ' ')}: ${(largePI * 10.0.pow(i))}".println()
+    }
+
+    ExFloat.setGlobalStringConverter(ExFloat.StringConverter.DECIMAL_ROUNDED_TO_3)
+    "DECIMAL_ROUNDED_TO_3".println()
+    (-10..10).forEach { i ->
+        "${i.toString().padStart(4, ' ')}: ${(largePI * 10.0.pow(i))}".println()
+    }
+
+    ExFloat.setGlobalStringConverter(ExFloat.StringConverter.SCIENTIFIC_ROUNDED_TO_3)
+    "SCIENTIFIC_ROUNDED_TO_3".println()
+    (-10..10).forEach { i ->
+        "${i.toString().padStart(4, ' ')}: ${(largePI * 10.0.pow(i))}".println()
+    }
+
+    ExFloat.setGlobalStringConverter(ExFloat.StringConverter.RoundedDecimal(0))
+    "RoundedDecimal(0)".println()
+    (-10..10).forEach { i ->
+        "${i.toString().padStart(4, ' ')}: ${(largePI * 10.0.pow(i))}".println()
+    }
+
+    ExFloat.setGlobalStringConverter(ExFloat.StringConverter.RoundedScience(0))
+    "RoundedScience(0)".println()
+    (-10..10).forEach { i ->
+        "${i.toString().padStart(4, ' ')}: ${(largePI * 10.0.pow(i))}".println()
+    }
+
+    ExFloat.setGlobalStringConverter(ExFloat.StringConverter.SCIENTIFIC)
+    2.toExFloat().println()
+}
+
+fun performanceEvaluation() {
 
     val testCount = 100000
     val intRange = Int.MIN_VALUE..Int.MAX_VALUE

@@ -1,11 +1,10 @@
 package com.johnsonoxr.exnumber
 
-import com.johnsonoxr.exnumber.ExFloat.Companion.toExFloat
 import kotlin.math.*
 
 class ExFloat private constructor(
     private val partitions: List<Int> = emptyList(),
-    private val expOffset: Int = 0,
+    private val offset: Int = 0,
     private val positive: Boolean = true
 ) : Number() {
 
@@ -46,17 +45,17 @@ class ExFloat private constructor(
         fun Long.toExFloat(): ExFloat {
             val partitions = mutableListOf<Int>()
             var carry = abs(this)
-            var expOffset = 0
+            var offset = 0
             while (carry != 0L) {
                 val v = (carry % EXP_MAX).toInt()
                 if (v == 0 && partitions.isEmpty()) {
-                    expOffset--
+                    offset++
                 } else {
-                    partitions.add((carry % EXP_MAX).toInt())
+                    partitions.add(v)
                 }
                 carry /= EXP_MAX
             }
-            return ExFloat(partitions, expOffset, this >= 0)
+            return ExFloat(partitions, offset, this >= 0)
         }
 
         private fun fromFloatString(string: String): ExFloat {
@@ -65,27 +64,22 @@ class ExFloat private constructor(
                 val (signStr, intStr, decimalStr, expStr) = floatMatch.destructured
                 val decimalStrWithoutDot = decimalStr.removePrefix(".")
                 val exp = (expStr.toIntOrNull() ?: 0) - (decimalStrWithoutDot.length)
-                val expRem = (exp % DIGIT + DIGIT) % DIGIT
+                val expRem = exp.remPositive(DIGIT)
                 var nStr = (intStr + decimalStrWithoutDot) + "0".repeat(expRem)
                 nStr = "0".repeat(DIGIT - nStr.length % DIGIT) + nStr
-                val nList = nStr.chunked(DIGIT).map { it.toInt() }.asReversed()
-                val expOffset = (expRem - exp) / DIGIT
-                val (trimmedList, newExpOffset) = trim(nList, expOffset)
+                val nList = nStr.chunked(DIGIT) { it.toString().toInt() }.asReversed()
                 return ExFloat(
-                    partitions = trimmedList,
-                    expOffset = newExpOffset,
+                    partitions = nList,
+                    offset = (exp - expRem) / DIGIT,
                     positive = signStr.isEmpty()
-                )
+                ).trim()
             }
             throw IllegalArgumentException("Invalid string: $string")
         }
 
-        private fun trim(partitions: List<Int>, exp: Int): Pair<List<Int>, Int> {
-            val trimStart = partitions.indexOfFirst { it != 0 }
-            return when (trimStart) {
-                -1 -> emptyList<Int>() to 0
-                else -> partitions.subList(trimStart, partitions.indexOfLast { it != 0 } + 1) to exp - trimStart
-            }
+        private fun Int.remPositive(divider: Int): Int {
+            val rem = this % divider
+            return if (rem < 0) rem + divider else rem
         }
     }
 
@@ -98,12 +92,16 @@ class ExFloat private constructor(
             }
 
             override fun convert(exFloat: ExFloat): String {
-                if (exFloat.sign == 0) return "0.0"
+                if (exFloat.sign == 0) return if (decimalCount == 0) "0" else "0." + "0".repeat(decimalCount)
 
                 val rounded = exFloat.round(-decimalCount)
                 val roundedStr = DECIMAL.convert(rounded)
 
-                return roundedStr + "0".repeat(decimalCount - roundedStr.substringAfter('.', "NA").length)
+                return if (decimalCount == 0) {
+                    roundedStr.substring(0, roundedStr.indexOf('.'))
+                } else {
+                    roundedStr + "0".repeat(decimalCount - roundedStr.substringAfter('.', "NA").length)
+                }
             }
         }
 
@@ -114,11 +112,17 @@ class ExFloat private constructor(
             }
 
             override fun convert(exFloat: ExFloat): String {
-                if (exFloat.sign == 0) return "0.0"
+                if (exFloat.sign == 0) return if (decimalCount == 0) "0" else "0." + "0".repeat(decimalCount)
 
                 val pow = log10(exFloat.partitions.last().toDouble()).toInt()
-                val rounded = exFloat.round((exFloat.partitions.size - exFloat.expOffset - 1) * DIGIT + pow - decimalCount)
-                return SCIENCE.convert(rounded)
+                val rounded = exFloat.round((exFloat.partitions.size + exFloat.offset - 1) * DIGIT + pow - decimalCount)
+
+                return if (decimalCount == 0) {
+                    val str = SCIENTIFIC.convert(rounded)
+                    val dotIdx = str.indexOf('.')
+                    val eIdx = str.indexOf('e')
+                    if (dotIdx == -1) str else str.removeRange(dotIdx, eIdx)
+                } else SCIENTIFIC.convert(rounded)
             }
         }
 
@@ -128,10 +132,10 @@ class ExFloat private constructor(
                 override fun convert(exFloat: ExFloat): String {
                     if (exFloat.sign == 0) return "0.0"
 
-                    val digits = (exFloat.partitions.size - exFloat.expOffset - 1) * DIGIT + log10(exFloat.partitions.last().toDouble()).toInt()
+                    val digits = (exFloat.partitions.size + exFloat.offset - 1) * DIGIT + log10(exFloat.partitions.last().toDouble()).toInt()
                     return when {
                         digits < 6 -> DECIMAL.convert(exFloat)
-                        else -> SCIENCE.convert(exFloat)
+                        else -> SCIENTIFIC.convert(exFloat)
                     }
                 }
             }
@@ -140,8 +144,8 @@ class ExFloat private constructor(
                 override fun convert(exFloat: ExFloat): String {
                     if (exFloat.sign == 0) return "0.0"
 
-                    val decimalExpTail = min(-exFloat.expOffset, 0)
-                    val intExpHead = max(exFloat.partitions.size - exFloat.expOffset, 0)
+                    val decimalExpTail = min(exFloat.offset, 0)
+                    val intExpHead = max(exFloat.partitions.size + exFloat.offset, 0)
 
                     val decimalStr = (-1 downTo decimalExpTail)
                         .joinToString("") { exFloat.getPartition(it).toString().padStart(DIGIT, '0') }
@@ -155,15 +159,15 @@ class ExFloat private constructor(
                 }
             }
 
-            val SCIENCE: StringConverter = object : StringConverter {
+            val SCIENTIFIC: StringConverter = object : StringConverter {
                 override fun convert(exFloat: ExFloat): String {
-                    if (exFloat.sign == 0) return "0.0"
+                    if (exFloat.sign == 0) return "0.0e0"
 
-                    val readableExp = (exFloat.partitions.size - exFloat.expOffset - 1) * DIGIT +
-                            floor(log10(exFloat.partitions.last().toDouble())).toInt()
+                    val digits = (exFloat.partitions.size + exFloat.offset - 1) * DIGIT + log10(exFloat.partitions.last().toDouble()).toInt()
 
-                    val numbers = exFloat.partitions.asReversed().joinToString("") { it.toString().padStart(DIGIT, '0') }.trim('0')
-                    return "${if (exFloat.positive) "" else "-"}${numbers[0]}.${numbers.substring(1)}e${readableExp}"
+                    var numbers = exFloat.partitions.asReversed().joinToString("") { it.toString().padStart(DIGIT, '0') }.trim('0')
+                    if (numbers.length < 2) numbers = numbers.padEnd(2, '0')
+                    return "${if (exFloat.positive) "" else "-"}${numbers[0]}.${numbers.substring(1)}e${digits}"
                 }
             }
 
@@ -171,9 +175,9 @@ class ExFloat private constructor(
             val DECIMAL_ROUNDED_TO_2: StringConverter = RoundedDecimal(2)
             val DECIMAL_ROUNDED_TO_3: StringConverter = RoundedDecimal(3)
 
-            val SCIENCE_ROUNDED_TO_1: StringConverter = RoundedScience(1)
-            val SCIENCE_ROUNDED_TO_2: StringConverter = RoundedScience(2)
-            val SCIENCE_ROUNDED_TO_3: StringConverter = RoundedScience(3)
+            val SCIENTIFIC_ROUNDED_TO_1: StringConverter = RoundedScience(1)
+            val SCIENTIFIC_ROUNDED_TO_2: StringConverter = RoundedScience(2)
+            val SCIENTIFIC_ROUNDED_TO_3: StringConverter = RoundedScience(3)
         }
 
         fun convert(exFloat: ExFloat): String
@@ -181,60 +185,60 @@ class ExFloat private constructor(
 
     interface ApproximateStrategy {
 
+        private class Round(val continuousPartitionCount: Int) : ApproximateStrategy {
+            override fun invoke(exFloat: ExFloat): ExFloat {
+                val partitionSize = exFloat.partitions.size
+                val revList = exFloat.partitions.asReversed()
+                var zerosCnt = 0
+                var ninesCnt = 0
+                for ((i, partition) in revList.withIndex()) {
+                    when (partition) {
+                        0 -> {
+                            zerosCnt++
+                            ninesCnt = 0
+                        }
+
+                        EXP_MAX - 1 -> {
+                            zerosCnt = 0
+                            ninesCnt++
+                        }
+
+                        else -> {
+                            zerosCnt = 0
+                            ninesCnt = 0
+                        }
+                    }
+
+                    if (zerosCnt >= continuousPartitionCount) {
+                        val meaningfulOffset = partitionSize - i - 1 + continuousPartitionCount
+                        return ExFloat(
+                            partitions = exFloat.partitions.subList(meaningfulOffset, partitionSize),
+                            offset = exFloat.offset + meaningfulOffset,
+                            positive = exFloat.positive
+                        )
+                    }
+
+                    if (ninesCnt >= continuousPartitionCount) {
+                        val meaningfulOffset = partitionSize - i - 1 + continuousPartitionCount
+                        return ExFloat(
+                            partitions = exFloat.partitions.subList(meaningfulOffset, partitionSize),
+                            offset = exFloat.offset + meaningfulOffset,
+                            positive = exFloat.positive
+                        ) + ExFloat(
+                            partitions = listOf(1),
+                            offset = exFloat.offset + meaningfulOffset,
+                            positive = exFloat.positive
+                        )
+                    }
+                }
+                return exFloat
+            }
+        }
+
         companion object {
 
             val NONE: ApproximateStrategy = object : ApproximateStrategy {
                 override operator fun invoke(exFloat: ExFloat): ExFloat {
-                    return exFloat
-                }
-            }
-
-            private class Round(val continuousPartitionCount: Int) : ApproximateStrategy {
-                override fun invoke(exFloat: ExFloat): ExFloat {
-                    val partitionSize = exFloat.partitions.size
-                    val revList = exFloat.partitions.asReversed()
-                    var zerosCnt = 0
-                    var ninesCnt = 0
-                    for ((i, partition) in revList.withIndex()) {
-                        when (partition) {
-                            0 -> {
-                                zerosCnt++
-                                ninesCnt = 0
-                            }
-
-                            EXP_MAX - 1 -> {
-                                zerosCnt = 0
-                                ninesCnt++
-                            }
-
-                            else -> {
-                                zerosCnt = 0
-                                ninesCnt = 0
-                            }
-                        }
-
-                        if (zerosCnt >= continuousPartitionCount) {
-                            val meaningfulPartitionExpOffset = partitionSize - i - 1 + continuousPartitionCount
-                            return ExFloat(
-                                partitions = exFloat.partitions.subList(meaningfulPartitionExpOffset, partitionSize),
-                                expOffset = exFloat.expOffset - meaningfulPartitionExpOffset,
-                                positive = exFloat.positive
-                            )
-                        }
-
-                        if (ninesCnt >= continuousPartitionCount) {
-                            val meaningfulPartitionExpOffset = partitionSize - i - 1 + continuousPartitionCount
-                            return ExFloat(
-                                partitions = exFloat.partitions.subList(meaningfulPartitionExpOffset, partitionSize),
-                                expOffset = exFloat.expOffset - meaningfulPartitionExpOffset,
-                                positive = exFloat.positive
-                            ) + ExFloat(
-                                partitions = listOf(1),
-                                expOffset = exFloat.expOffset - meaningfulPartitionExpOffset,
-                                positive = exFloat.positive
-                            )
-                        }
-                    }
                     return exFloat
                 }
             }
@@ -247,32 +251,47 @@ class ExFloat private constructor(
         operator fun invoke(exFloat: ExFloat): ExFloat
     }
 
-    override fun toLong(): Long {
-        if (this.sign == 0) return 0L
+    private fun trim(): ExFloat {
+        val trimStart = partitions.indexOfFirst { it != 0 }
+        if (trimStart == -1) return ExFloat()
 
-        val expEnd = max(this.partitions.size - this.expOffset, 0)
+        val trimEnd = partitions.indexOfLast { it != 0 }
+        if (trimStart == 0 && trimEnd == partitions.lastIndex) return this
+
+        return ExFloat(
+            partitions = partitions.subList(trimStart, trimEnd + 1),
+            offset = offset + trimStart,
+            positive = positive
+        )
+    }
+
+    override fun toLong(): Long {
+        if (sign == 0) return 0L
+
+        val offsetUpperBound = max(partitions.size + offset, 0)
+        val offsetLowerBound = 0
 
         var result = 0L
-        for (i in expEnd - 1 downTo 0) {
-            result = result * EXP_MAX + this.getPartition(i)
+        for (i in offsetUpperBound - 1 downTo offsetLowerBound) {
+            result = result * EXP_MAX + getPartition(i)
         }
-        return if (this.positive) result else -result
+        return if (positive) result else -result
     }
 
     override fun toShort(): Short = toLong().toShort()
 
     override fun toDouble(): Double {
-        if (this.sign == 0) return 0.0
+        if (sign == 0) return 0.0
 
-        val expEnd = max(this.partitions.size - this.expOffset, 0)
-        val expStart = min(-this.expOffset, 0)
+        val offsetUpperBound = max(partitions.size + offset, 0)
+        val offsetLowerBound = min(offset, 0)
 
         var result = 0.0
-        for (i in expEnd - 1 downTo expStart) {
-            result = result * EXP_MAX + this.getPartition(i)
+        for (i in offsetUpperBound - 1 downTo offsetLowerBound) {
+            result = result * EXP_MAX + getPartition(i)
         }
-        result *= 10.0.pow(expStart * DIGIT)
-        return if (this.positive) result else -result
+        result *= 10.0.pow(offsetLowerBound * DIGIT)
+        return if (positive) result else -result
     }
 
     override fun toFloat(): Float = toDouble().toFloat()
@@ -346,12 +365,12 @@ class ExFloat private constructor(
         }
     }
 
-    private fun getPartition(exp: Int): Int {
-        return partitions.getOrElse(expOffset + exp) { 0 }
+    private fun getPartition(offset: Int): Int {
+        return partitions.getOrElse(offset - this.offset) { 0 }
     }
 
-    private fun expShiftLeft(exp: Int): ExFloat {
-        return ExFloat(partitions, expOffset - exp, positive)
+    private fun expShiftLeft(offset: Int): ExFloat {
+        return ExFloat(partitions, this.offset + offset, positive)
     }
 
     operator fun plus(other: ExFloat): ExFloat {
@@ -377,11 +396,11 @@ class ExFloat private constructor(
         if (!this.positive && other.positive) return other - -this
 
         val partitions = mutableListOf<Int>()
-        val expStart = min(-this.expOffset, -other.expOffset)
-        val expEnd = max(this.partitions.size - this.expOffset, other.partitions.size - other.expOffset)
+        val offsetStart = min(this.offset, other.offset)
+        val offsetEnd = max(this.partitions.size + this.offset, other.partitions.size + other.offset)
 
         var carry = 0
-        for (i in expStart until expEnd) {
+        for (i in offsetStart until offsetEnd) {
             val sum = this.getPartition(i) + other.getPartition(i) + carry
             partitions.add(sum % EXP_MAX)
             carry = sum / EXP_MAX
@@ -390,11 +409,7 @@ class ExFloat private constructor(
             partitions.add(carry)
         }
 
-        val (trimmedPartitions, trimExp) = trim(partitions, -expStart)
-
-        val result = ExFloat(trimmedPartitions, trimExp, this.positive)
-
-        return approxStrategy(result)
+        return approxStrategy(ExFloat(partitions, offsetStart, this.positive).trim())
     }
 
     private fun minusInternal(other: ExFloat, approxStrategy: ApproximateStrategy = ApproximateStrategy.NONE): ExFloat {
@@ -403,14 +418,14 @@ class ExFloat private constructor(
         if (this.positive != other.positive) return this + -other
 
         val partitions = mutableListOf<Int>()
-        val expStart = min(-this.expOffset, -other.expOffset)
-        val expEnd = max(this.partitions.size - this.expOffset, other.partitions.size - other.expOffset)
+        val offsetStart = min(this.offset, other.offset)
+        val offsetEnd = max(this.partitions.size + this.offset, other.partitions.size + other.offset)
 
         val forwardMinus = this > other == this.positive
         val (minuend, subtrahend) = if (forwardMinus) this to other else other to this
 
         var carry = 0
-        for (i in expStart until expEnd) {
+        for (i in offsetStart until offsetEnd) {
             val diff = minuend.getPartition(i) - subtrahend.getPartition(i) - carry
             partitions.add(if (diff < 0) diff + EXP_MAX else diff)
             carry = if (diff < 0) 1 else 0
@@ -419,9 +434,7 @@ class ExFloat private constructor(
             partitions.add(carry)
         }
 
-        val (trimmedPartitions, trimExp) = trim(partitions, -expStart)
-
-        return approxStrategy(ExFloat(trimmedPartitions, trimExp, forwardMinus == this.positive))
+        return approxStrategy(ExFloat(partitions, offsetStart, forwardMinus == this.positive).trim())
     }
 
     private fun timesInternal(other: ExFloat, approxStrategy: ApproximateStrategy = ApproximateStrategy.NONE): ExFloat {
@@ -443,9 +456,7 @@ class ExFloat private constructor(
             }
         }
 
-        val (trimmedPartitions, trimExp) = trim(partitions, this.expOffset + other.expOffset)
-
-        return approxStrategy(ExFloat(trimmedPartitions, trimExp, this.positive == other.positive))
+        return approxStrategy(ExFloat(partitions, this.offset + other.offset, this.positive == other.positive).trim())
     }
 
     private fun divInternal(other: ExFloat, approxStrategy: ApproximateStrategy = ApproximateStrategy.NONE): ExFloat {
@@ -457,9 +468,9 @@ class ExFloat private constructor(
 
         val revPartitions = mutableListOf<Int>()
 
-        val thisMaxExp = positiveThis.partitions.size - positiveThis.expOffset
-        val otherMaxExp = positiveOther.partitions.size - positiveOther.expOffset
-        var exp = thisMaxExp - otherMaxExp + 1
+        val thisMaxOffset = positiveThis.partitions.size + positiveThis.offset
+        val otherMaxOffset = positiveOther.partitions.size + positiveOther.offset
+        var curOffset = thisMaxOffset - otherMaxOffset + 1
 
         var remainder = positiveThis
 
@@ -467,11 +478,11 @@ class ExFloat private constructor(
                 positiveOther.partitions.getOrElse(positiveOther.partitions.size - 2) { 0 }.toLong()
 
         while (remainder.sign != 0 && revPartitions.size * DIGIT < DIV_PRECISION) {
-            exp--
+            curOffset--
 
-            var d = (remainder.getPartition(exp + otherMaxExp + 1).toLong() * EXP_MAX * EXP_MAX +
-                    remainder.getPartition(exp + otherMaxExp).toLong() * EXP_MAX +
-                    remainder.getPartition(exp + otherMaxExp - 1).toLong())
+            var d = (remainder.getPartition(curOffset + otherMaxOffset + 1).toLong() * EXP_MAX * EXP_MAX +
+                    remainder.getPartition(curOffset + otherMaxOffset).toLong() * EXP_MAX +
+                    remainder.getPartition(curOffset + otherMaxOffset - 1).toLong())
 
             if (!remainder.positive) {
                 d *= -1
@@ -496,21 +507,19 @@ class ExFloat private constructor(
                 }
             }
 
-            remainder = remainder.minusInternal(positiveOther.timesInternal(div.toExFloat().expShiftLeft(exp + 1)))
+            remainder = remainder.minusInternal(positiveOther.timesInternal(div.toExFloat().expShiftLeft(curOffset + 1)))
         }
 
-        val (trimmedPartitions, trimExp) = trim(revPartitions.asReversed(), -exp - 1)
-
-        return approxStrategy(ExFloat(trimmedPartitions, trimExp, this.positive == other.positive))
+        return approxStrategy(ExFloat(revPartitions.asReversed(), curOffset + 1, this.positive == other.positive).trim())
     }
 
     operator fun compareTo(other: ExFloat): Int {
         if (this.sign != other.sign) return this.sign - other.sign
 
-        val expStart = min(-this.expOffset, -other.expOffset)
-        val expEnd = max(this.partitions.size - this.expOffset, other.partitions.size - other.expOffset)
+        val offsetStart = min(this.offset, other.offset)
+        val offsetEnd = max(this.partitions.size + this.offset, other.partitions.size + other.offset)
 
-        for (i in expEnd - 1 downTo expStart) {
+        for (i in offsetEnd - 1 downTo offsetStart) {
             val thisPartition = this.getPartition(i)
             val otherPartition = other.getPartition(i)
             if (thisPartition != otherPartition) {
@@ -533,7 +542,7 @@ class ExFloat private constructor(
     }
 
     operator fun unaryMinus(): ExFloat {
-        return ExFloat(partitions, expOffset, !positive)
+        return ExFloat(partitions, offset, !positive)
     }
 
     override fun toString(): String {
@@ -548,14 +557,14 @@ class ExFloat private constructor(
     }
 
     override fun hashCode(): Int {
-        return this.partitions.hashCode() + this.expOffset.hashCode() + this.positive.hashCode()
+        return this.partitions.hashCode() + this.offset + this.positive.hashCode()
     }
 
     fun floor(digit: Int = 0): ExFloat {
-        val rem = (digit % DIGIT + DIGIT) % DIGIT
-        val partitionIdx = (digit - rem) / DIGIT
+        val rem = digit.remPositive(DIGIT)
+        val sliceOffset = (digit - rem) / DIGIT
 
-        val slicedPartition = getPartition(partitionIdx)
+        val slicedPartition = getPartition(sliceOffset)
 
         val trimmedPartition = when {
             rem == 0 -> slicedPartition
@@ -566,17 +575,17 @@ class ExFloat private constructor(
             }
         }
 
-        val partitionFrom = (partitionIdx + 1 + expOffset).coerceIn(0, partitions.size)
-        val upperPartitions = listOf(trimmedPartition) + partitions.subList(partitionFrom, partitions.size)
-        val (trimmedPartitions, trimExp) = trim(upperPartitions, expOffset - partitions.size + upperPartitions.size)
+        val partitionStartIndex = (sliceOffset + 1 - offset).coerceIn(0, partitions.size)
+        val upperPartitions = listOf(trimmedPartition) + partitions.subList(partitionStartIndex, partitions.size)
+        val trimmedExFloat = ExFloat(upperPartitions, offset + partitions.size - upperPartitions.size, positive).trim()
 
         return if (positive) {
-            ExFloat(trimmedPartitions, trimExp, true)
+            trimmedExFloat
         } else {
-            val hasRem = (slicedPartition - trimmedPartition > 0) || partitions.subList(0, partitionFrom).any { it != 0 }
+            val hasRem = (slicedPartition - trimmedPartition > 0) || partitions.subList(0, partitionStartIndex).any { it != 0 }
             when {
-                hasRem -> ExFloat(trimmedPartitions, trimExp, false) + ExFloat(listOf(10.0.pow(rem).toInt()), -partitionIdx, false)
-                else -> ExFloat(trimmedPartitions, trimExp, false)
+                hasRem -> trimmedExFloat + ExFloat(listOf(10.0.pow(rem).toInt()), sliceOffset, false)
+                else -> trimmedExFloat
             }
         }
     }
@@ -586,14 +595,14 @@ class ExFloat private constructor(
     }
 
     fun round(digit: Int = 0): ExFloat {
-        val rem = (digit % DIGIT + DIGIT) % DIGIT
-        val partitionIdx = (digit - rem) / DIGIT
+        val rem = digit.remPositive(DIGIT)
+        val sliceOffset = (digit - rem) / DIGIT
 
-        val slicedPartition = getPartition(partitionIdx)
+        val slicedPartition = getPartition(sliceOffset)
 
         val (trimmedPartition, nextDigit) = when {
             rem == 0 -> {
-                val nextPartition = getPartition(partitionIdx - 1)
+                val nextPartition = getPartition(sliceOffset - 1)
                 slicedPartition to (nextPartition / (EXP_MAX / 10))
             }
 
@@ -605,20 +614,19 @@ class ExFloat private constructor(
             }
         }
 
-        val partitionFrom = (partitionIdx + 1 + expOffset).coerceIn(0, partitions.size)
-        val upperPartitions = listOf(trimmedPartition) + partitions.subList(partitionFrom, partitions.size)
-        val (trimmedPartitions, trimExp) = trim(upperPartitions, expOffset - partitions.size + upperPartitions.size)
+        val partitionStartIndex = (sliceOffset + 1 - offset).coerceIn(0, partitions.size)
+        val upperPartitions = listOf(trimmedPartition) + partitions.subList(partitionStartIndex, partitions.size)
+        val trimmedExFloat = ExFloat(upperPartitions, offset + partitions.size - upperPartitions.size, positive).trim()
 
         return if (nextDigit < 5) {
-            ExFloat(trimmedPartitions, trimExp, positive)
+            trimmedExFloat
         } else {
-            val one = ExFloat(listOf(10.0.pow(rem).toInt()), -partitionIdx, positive)
-            ExFloat(trimmedPartitions, trimExp, positive) + one
+            trimmedExFloat + ExFloat(listOf(10.0.pow(rem).toInt()), sliceOffset, positive)
         }
     }
 
     fun content(): String {
-        return "ExFloat(pos=$positive, expOffset=$expOffset, partitions=$partitions)"
+        return "ExFloat(pos=$positive, expOffset=$offset, partitions=$partitions)"
     }
 
     val sign: Int = when {
