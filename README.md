@@ -109,7 +109,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.johnsonoxr:exnumber:v1.0.4")
+    implementation("com.github.johnsonoxr:exnumber:v1.0.5")
 }
 ```
 
