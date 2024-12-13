@@ -303,12 +303,12 @@ class ExFloat private constructor(
     operator fun compareTo(number: Number): Int {
         return when (number) {
             is ExFloat -> compareTo(number)
-            is Double -> toDouble().compareTo(number)
-            is Float -> toFloat().compareTo(number)
-            is Long -> toLong().compareTo(number)
-            is Int -> toInt().compareTo(number)
-            is Short -> toShort().compareTo(number)
-            is Byte -> toByte().compareTo(number)
+            is Double -> compareTo(number.toExFloat())
+            is Float -> compareTo(number.toExFloat())
+            is Long -> compareTo(number.toExFloat())
+            is Int -> compareTo(number.toExFloat())
+            is Short -> compareTo(number.toExFloat())
+            is Byte -> compareTo(number.toExFloat())
             else -> throw IllegalArgumentException("Unsupported number type: ${number::class.simpleName}")
         }
     }
